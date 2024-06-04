@@ -1,0 +1,31 @@
+# untracked files
+.untracked
+
+# envs
+envs/*
+.vscode
+
+# extensions
+*.pyc
+*.ckpt
+*.pth
+*.safetensors
+*.trt
+*.onnx
+*.tar
+*.sh
+*.gstmp
+*.ipynb
+
+
+# cache
+__pycache__
+src/flash.egg-info
+build
+*.DS_Store
+doc/build
+src/flash.egg-info
+
+# directories
+wandb/
+examples/logs/*

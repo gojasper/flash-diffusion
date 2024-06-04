@@ -1,0 +1,53 @@
+
+EXP_NAME: FlashPixart
+
+# Dataset
+SHARDS_PATH_OR_URLS:
+  - pipe:cat /path/to/tar/files/{000000..000010}.tar
+VALIDATION_PROMPTS:
+  - A beautiful red car on the beach at sunset, 4k, photorealistic, awesome.
+  - A blue pig in the space, cartoon style, funny, cute.
+
+# Model
+LORA: True
+LORA_RANK: 64
+K: [16, 16, 16, 16]
+NUM_ITERATIONS_PER_K: [10000, 10000, 10000, 10000]
+GUIDANCE_MIN: 2.0
+GUIDANCE_MAX: 9.0
+DISTILL_LOSS_TYPE: lpips
+UCG_KEYS: [text]
+TIMESTEP_DISTRIBUTION: mixture
+MIXTURE_NUM_COMPONENTS: 4
+MIXTURE_VAR: 0.5
+USE_DMD_LOSS: True
+DISTILL_LOSS_SCALE: [1.0, 1.0, 1.0, 1.0]
+ADVERSARIAL_LOSS_SCALE: [0, 0.05, 0.1, 0.2]
+DMD_LOSS_SCALE: [0, 0.3, 0.5, 0.7]
+GAN_LOSS_TYPE: lsgan
+MODE_PROBS: [
+    [0.0, 0.0, 0.5, 0.5],
+    [0.1, 0.3, 0.3, 0.3],
+    [0.25, 0.25, 0.25, 0.25],
+    [0.4, 0.2, 0.2, 0.2],
+]
+USE_TEACHER_AS_REAL: False
+TEACHER_SCHEDULER: DPMSolverMultistepScheduler
+SAMPLING_SCHEDULER: LCMScheduler
+TEACHER_SAMPLING_SCHEDULER: DPMSolverMultistepScheduler
+USE_EMPTY_PROMPT: True
+
+
+# Training
+LR: 0.00001
+LR_DISCRIMINATOR: 0.00001
+MAX_EPOCHS: 100
+BATCH_SIZE: 2
+
+# Logging
+LOG_EVERY_N_BATCHES: 200
+NUM_STEPS: [1, 2, 4]
+LOG_TEACHER_SAMPLES: True
+CKPT_EVERY_N_STEPS: 40000
+LOG_TEACHER_SAMPLES: True
+TEACHER_SAMPLING_GUIDANCE_SCALE: 3.0
