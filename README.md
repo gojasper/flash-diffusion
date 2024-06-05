@@ -1,12 +1,12 @@
 # ⚡ Flash Diffusion ⚡
 
-This repository is the official implementation of the paper [Flash Diffusion: Accelerating Any Conditional Diffusion Model for Few Steps Image Generation](https://arxiv.org/).
+This repository is the official implementation of the paper [Flash Diffusion: Accelerating Any Conditional Diffusion Model for Few Steps Image Generation](http://arxiv.org/abs/2406.02347).
 
 <p align="center">
-    <a href="https://arxiv.org/">
+    <a href="http://arxiv.org/abs/2406.02347">
 	    <img src='https://img.shields.io/badge/Paper-2206.08309-green' />
 	</a>
-    <a href="http://flash-difusion.github.io">
+    <a href="https://gojasper.github.io/flash-diffusion-project/">
 	    <img src='https://img.shields.io/badge/Project-page-blue' />
 	</a>
     <a href="https://huggingface.co/spaces/jasperai/flash-diffusion">
@@ -280,8 +280,12 @@ This code is released under the [Creative Commons BY-NC 4.0 license](https://cre
 If you find this work useful or use it in your research, please consider citing us
 
 ```bibtex
-@inproceedings{chadebec2024flash,
- author = {Chadebec, Clement and Onur, Tasar and Benaroche, Eyal and Benjamin, Aubin},
- title = {Flash Diffusion: Accelerating Any Conditional Diffusion Model for Few Steps Image Generation},
+@misc{chadebec2024flash,
+      title={Flash Diffusion: Accelerating Any Conditional Diffusion Model for Few Steps Image Generation}, 
+      author={Clement Chadebec and Onur Tasar and Eyal Benaroche and Benjamin Aubin},
+      year={2024},
+      eprint={2406.02347},
+      archivePrefix={arXiv},
+      primaryClass={cs.CV}
 }
 ```
