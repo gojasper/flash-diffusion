@@ -4,7 +4,7 @@ This repository is the official implementation of the paper [Flash Diffusion: Ac
 
 <p align="center">
     <a href="http://arxiv.org/abs/2406.02347">
-	    <img src='https://img.shields.io/badge/Paper-2206.08309-green' />
+	    <img src='https://img.shields.io/badge/Paper-2406.02347-green' />
 	</a>
     <a href="https://gojasper.github.io/flash-diffusion-project/">
 	    <img src='https://img.shields.io/badge/Project-page-blue' />
