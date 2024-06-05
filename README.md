@@ -29,11 +29,20 @@ This repository is the official implementation of the paper [Flash Diffusion: Ac
 	</a>
 </p>
 
-<p align="center">
-        <img style="width:600px;" src="assets/flash_grid.jpg">
-</p>
+<figure>
+	<p align="center">
+        	<img style="width:600px;" src="assets/flash_grid.jpg">
+			<figcaption>
+				<p align="center">
+					<b>Images generated using 4 NFEs</b>
+			 	</p>
+			</figcaption>
+	 </p>
+</figure>
 
-In this paper, we propose an efficient, fast, and versatile distillation method to accelerate the generation of pre-trained diffusion models: Flash Diffusion. The method reaches state-of-the-art performances in terms of FID and CLIP-Score for few steps image generation on the COCO 2014 and COCO 2017 datasets, while requiring only several GPU hours of training and fewer trainable parameters than existing methods. In addition to its efficiency, the versatility of the method is also exposed across several tasks such as text-to-image, inpainting, face-swapping, super-resolution and using different diffusion models backbones either using a UNet-based denoisers (SD1.5, SDXL) or DiT (Pixart-α), as well as adapters. In all cases, the method allowed to reduce drastically the number of sampling steps while maintaining very high-quality image generation.
+
+
+In this paper, we propose an efficient, fast, versatile and LoRA-compatible distillation method to accelerate the generation of pre-trained diffusion models: *Flash Diffusion*. The method reaches state-of-the-art performances in terms of FID and CLIP-Score for few steps image generation on the COCO 2014 and COCO 2017 datasets, while requiring only **several GPU hours of training** and fewer trainable parameters than existing methods. In addition to its efficiency, the versatility of the method is also exposed across several tasks such as text-to-image, inpainting, face-swapping, super-resolution and using different diffusion models backbones either using a UNet-based denoisers (SD1.5, SDXL) or DiT (Pixart-α), as well as adapters. In all cases, the method allowed to reduce drastically the number of sampling steps while maintaining very high-quality image generation.
 
 ## Method
 
@@ -53,22 +62,43 @@ Our method aims to create a fast, reliable, and adaptable approach for various u
 
 ### Varying backbones for *Text-to-image*
 <details>
-    <summary><b>Text-to-image Flash SD</b></summary>
-    <p align="center">
-            <img style="width:600px;" src="assets/flash_sd_grid.jpg">
-    </p>
+    <summary><b>Flash SD</b></summary>
+<figure>
+	<p align="center">
+        	<img style="width:600px;" src="assets/flash_sd_grid.jpg">
+			<figcaption>
+				<p align="center">
+					<b>Images generated using 4 NFEs</b>
+			 	</p>
+			</figcaption>
+	 </p>
+</figure>
 </details>
 <details>
-    <summary><b>Text-to-image Flash SDXL</b></summary>
-    <p align="center">
-            <img style="width:600px;" src="assets/flash_sdxl_grid.jpg">
-    </p>
+    <summary><b>Flash SDXL</b></summary>
+<figure>
+	<p align="center">
+        	<img style="width:600px;" src="assets/flash_sdxl_grid.jpg">
+			<figcaption>
+				<p align="center">
+					<b>Images generated using 4 NFEs</b>
+			 	</p>
+			</figcaption>
+	 </p>
+</figure>
 </details>
 <details>
-    <summary><b>Text-to-image Flash Pixart (DiT)</b></summary>
-    <p align="center">
-            <img style="width:600px;" src="assets/flash_pixart_grid.jpg">
-    </p>
+    <summary><b>Flash Pixart (DiT)</b></summary>
+<figure>
+	<p align="center">
+        	<img style="width:600px;" src="assets/flash_pixart_grid.jpg">
+			<figcaption>
+				<p align="center">
+					<b>Images generated using 4 NFEs</b>
+			 	</p>
+			</figcaption>
+	 </p>
+</figure>
 </details>
 
 ### Varying Use-cases
