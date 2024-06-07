@@ -404,7 +404,7 @@ def main(args):
 
 
 if __name__ == "__main__":
-    config_path = "examples/configs/flash_canny_adapter.yaml"
+    config_path = "configs/flash_canny_adapter.yaml"
     with open(config_path, "r") as f:
         args = yaml.safe_load(f)
         main(args)
