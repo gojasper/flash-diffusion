@@ -1,6 +1,6 @@
 diffusers @ git+https://github.com/initml/diffusers.git@clement/feature/flash
 --extra-index-url https://download.pytorch.org/whl/cu118
-torch==2.1.0
+torch==2.2.0
 torchaudio
 torchvision
 xformers
