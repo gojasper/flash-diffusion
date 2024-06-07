@@ -44,6 +44,15 @@ This repository is the official implementation of the paper [Flash Diffusion: Ac
 
 In this paper, we propose an efficient, fast, versatile and LoRA-compatible distillation method to accelerate the generation of pre-trained diffusion models: *Flash Diffusion*. The method reaches state-of-the-art performances in terms of FID and CLIP-Score for few steps image generation on the COCO 2014 and COCO 2017 datasets, while requiring only **several GPU hours of training** and fewer trainable parameters than existing methods. In addition to its efficiency, the versatility of the method is also exposed across several tasks such as text-to-image, inpainting, face-swapping, super-resolution and using different diffusion models backbones either using a UNet-based denoisers (SD1.5, SDXL) or DiT (Pixart-α), as well as adapters. In all cases, the method allowed to reduce drastically the number of sampling steps while maintaining very high-quality image generation.
 
+## Quick access
+- [Method overview](#method)
+- [Results overview](#results)
+- [Installation 🛠️](#setup)
+- [Text2Image model distillation](#distilling-existing-t2i-models)
+- [Distilling a custom model 🚀](#example-of-a-distillation-training-with-a-custom-conditional-diffusion-model)
+- [Inference with 🤗 Hugging Face pipelines](#inference-with-a-huggingface-pipeline-)
+- [Citing this repository](#citation)
+
 ## Method
 
 Our method aims to create a fast, reliable, and adaptable approach for various uses. We propose to train a student model to predict in a single step a denoised multiple-step teacher prediction of a corrupted input sample. Additionally, we sample timesteps from an adaptable distribution that shifts during training to help the student model target specific timesteps.
@@ -262,7 +271,7 @@ unet = DiffusersUNet2DCondWrapper(
 student_denoiser = deepcopy(teacher_denoiser)
 ```
 
-## Inference with a Huggingface pipeline
+## Inference with a Huggingface pipeline 🤗
 
 ```python
 import torch
