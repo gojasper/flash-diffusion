@@ -271,7 +271,7 @@ unet = DiffusersUNet2DCondWrapper(
 student_denoiser = deepcopy(teacher_denoiser)
 ```
 
-## Inference with a Huggingface pipeline 🤗
+## Inference with a Hugging Face pipeline 🤗
 
 ```python
 import torch
