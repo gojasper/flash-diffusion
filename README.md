@@ -204,7 +204,7 @@ python3.10 examples/train_flash_canny_adapter.py
 
 ## Example of a distillation training with a custom conditional diffusion model
 
-This package is also indended to support custom model distillation. 
+This package is also intended to support custom model distillation. 
 
 ```python
 from copy import deepcopy
