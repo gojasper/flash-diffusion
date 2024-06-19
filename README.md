@@ -10,10 +10,11 @@ This repository is the official implementation of the paper [Flash Diffusion: Ac
 	    <img src='https://img.shields.io/badge/Project-page-blue' />
 	</a>
     <a href="https://huggingface.co/spaces/jasperai/flash-diffusion">
-	    <img src='https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Demo-orange' />
+	    <img src='https://img.shields.io/badge/%F0%9F%A4%97%20Demo-FlashPixart-orange' />
 	</a>
-    <a>
-	    <img src='https://img.shields.io/badge/Code%20style-black-black' />
+    <a href="https://huggingface.co/spaces/jasperai/flash-sd3">
+	    <img src='https://img.shields.io/badge/%F0%9F%A4%97%20Demo-FlashSD3-orange' />
+	</a>
     <a href='https://creativecommons.org/licenses/by-nd/4.0/legalcode'>
 	    <img src="https://img.shields.io/badge/Licence-CC.BY.NC-purple" />
 	</a>
@@ -26,6 +27,9 @@ This repository is the official implementation of the paper [Flash Diffusion: Ac
 	</a>
 	<a href="https://huggingface.co/jasperai/flash-pixart">
 	    <img src='https://img.shields.io/badge/%F0%9F%A4%97%20Ckpt-FlashPixart-yellow' />
+	</a>
+    	<a href="https://huggingface.co/jasperai/flash-sd3">
+	    <img src='https://img.shields.io/badge/%F0%9F%A4%97%20Ckpt-FlashSD3-yellow' />
 	</a>
 </p>
 
@@ -65,16 +69,17 @@ Our method aims to create a fast, reliable, and adaptable approach for various u
 ## Results
 
 <it>Flash Diffusion</it> is compatible with various backbones such as
-- [Flash SD](https://huggingface.co/jasperai/flash-sd), distilled from a [SD1.5 teacher](https://huggingface.co/runwayml/stable-diffusion-v1-5)
+- [Flash Stable Diffusion 3](https://huggingface.co/jasperai/flash-sd3), distilled from a [Stable Diffusion 3 teacher](https://huggingface.co/stabilityai/stable-diffusion-3-medium)
 - [Flash SDXL](https://huggingface.co/jasperai/flash-sdxl), distilled from a [SDXL teacher](https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0)
 - [Flash Pixart (DiT)](https://huggingface.co/jasperai/flash-pixart), distilled from a [Pixart-α teacher](https://huggingface.co/PixArt-alpha/PixArt-XL-2-1024-MS)
+- [Flash SD](https://huggingface.co/jasperai/flash-sd), distilled from a [SD1.5 teacher](https://huggingface.co/runwayml/stable-diffusion-v1-5)
 
 ### Varying backbones for *Text-to-image*
 <details>
-    <summary><b>Flash SD</b></summary>
+    <summary><b>Flash Stable Diffusion 3</b></summary>
 <figure>
 	<p align="center">
-        	<img style="width:600px;" src="assets/flash_sd_grid.jpg">
+        	<img style="width:600px;" src="assets/flash_sd3.jpg">
 			<figcaption>
 				<p align="center">
 					<b>Images generated using 4 NFEs</b>
@@ -101,6 +106,19 @@ Our method aims to create a fast, reliable, and adaptable approach for various u
 <figure>
 	<p align="center">
         	<img style="width:600px;" src="assets/flash_pixart_grid.jpg">
+			<figcaption>
+				<p align="center">
+					<b>Images generated using 4 NFEs</b>
+			 	</p>
+			</figcaption>
+	 </p>
+</figure>
+</details>
+<details>
+    <summary><b>Flash SD</b></summary>
+<figure>
+	<p align="center">
+        	<img style="width:600px;" src="assets/flash_sd_grid.jpg">
 			<figcaption>
 				<p align="center">
 					<b>Images generated using 4 NFEs</b>
@@ -163,10 +181,11 @@ pip install -e .
 
 ## Distilling existing T2I models
 The main scripts to reproduce the main experiments of the paper are located in the `examples`. We provide 4 diffirent scripts:
-- `train_flash_sd.py`: Distils [SD1.5 model](https://huggingface.co/runwayml/stable-diffusion-v1-5)
+- `train_flash_sd3.py`: Distils [SD3 model](https://huggingface.co/stabilityai/stable-diffusion-3-medium)
 - `train_flash_sdxl.py`: Distils [SDXL model](https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0)
 - `train_flash_pixart`: Distils [Pixart-α model](https://huggingface.co/PixArt-alpha/PixArt-XL-2-1024-MS)
 - `train_flash_canny_adapter.py`: Distils a [T2I Canny Adapter](https://huggingface.co/TencentARC/t2i-adapter-canny-sdxl-1.0?library=true)
+- `train_flash_sd.py`: Distils [SD1.5 model](https://huggingface.co/runwayml/stable-diffusion-v1-5)
 
 In `examples\configs`, you will find the configuration `yaml` associated to each script. The only thing you need is to amend the `SHARDS_PATH_OR_URLS` section of the `yaml` so the model is trained on your own data. Please note that this package uses [`webdataset`](https://github.com/webdataset/webdataset) to handle the datastream and so the urls you use should be fomatted according to the  [`webdataset format`](https://github.com/webdataset/webdataset?tab=readme-ov-file#the-webdataset-format). In particular, for those 4 examples, each sample needs to be composed of a `jpg` file containing the image and a `json` file containing the caption under the key `caption` and the image aesthetics score `aesthetic_score`:
 
@@ -204,7 +223,7 @@ python3.10 examples/train_flash_canny_adapter.py
 
 ## Example of a distillation training with a custom conditional diffusion model
 
-This package is also indended to support custom model distillation. 
+This package is also intended to support custom model distillation. 
 
 ```python
 from copy import deepcopy
@@ -271,7 +290,7 @@ unet = DiffusersUNet2DCondWrapper(
 student_denoiser = deepcopy(teacher_denoiser)
 ```
 
-## Inference with a Huggingface pipeline 🤗
+## Inference with a Hugging Face pipeline 🤗
 
 ```python
 import torch
