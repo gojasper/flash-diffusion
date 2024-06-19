@@ -1,5 +1,4 @@
 import logging
-import time
 from copy import deepcopy
 from typing import Any, Dict, List, Tuple, Union
 
@@ -7,20 +6,28 @@ import lpips
 import numpy as np
 import torch
 import torch.nn.functional as F
+from diffusers import DiffusionPipeline
 from diffusers.schedulers import DDPMScheduler, LCMScheduler
 from tqdm import tqdm
 
-from ..adapters import DiffusersT2IAdapterWrapper
 from ..base.base_model import BaseModel
 from ..embedders import ConditionerWrapper
 from ..transformers import DiffusersTransformer2DWrapper
 from ..unets import DiffusersUNet2DCondWrapper, DiffusersUNet2DWrapper
-from ..utils import append_dims, extract_into_tensor
 from ..vae import AutoencoderKLDiffusers
-from .flash_diffusion_config import FlashDiffusionConfig
+from .flash_diffusion_config import FlashDiffusionSD3Config
 
 
-def gaussian_mixture(k, locs, var, mode_probs=None):
+def gaussian_mixture(locs, var, mode_probs=None):
+    """
+    Gaussian mixture distribution
+
+    Args:
+
+        locs (List[int]): The mean of each mode
+        var (float): The variance of each mode
+        mode_probs (Optional[List[float]]): The weight for each mode. If None, uniform weights are used.
+    """
     if mode_probs is None:
         mode_probs = [1 / len(locs)] * len(locs)
 
@@ -29,17 +36,35 @@ def gaussian_mixture(k, locs, var, mode_probs=None):
             mode_probs[i] * torch.exp(-torch.tensor([(x - loc) ** 2 / var]))
             for i, loc in enumerate(locs)
         ]
-        # prob.append(mode_prob * torch.exp(-torch.tensor([(x) ** 2 / var])))
         return sum(prob)
 
     return _gaussian
 
 
-class FlashDiffusion(BaseModel):
+class FlashDiffusionSD3(BaseModel):
+    """
+    Flash Diffusion model.
+
+    A method to accelerate the sampling for conditional diffusion models.
+
+    Args:
+
+        config (FlashDiffusionSD3Config): The configuration class for the FlashDiffusion model.
+        student_denoiser (Union[DiffusersUNet2DWrapper, DiffusersUNet2DCondWrapper, DiffusersTransformer2DWrapper]): The student denoiser model.
+        teacher_denoiser (Union[DiffusersUNet2DWrapper, DiffusersUNet2DCondWrapper, DiffusersTransformer2DWrapper], optional): The teacher denoiser model. Defaults to None.
+        teacher_noise_scheduler (DDPMScheduler): The teacher noise scheduler to generate synthetic sqmples during training. Defaults to None.
+        teacher_sampling_noise_scheduler (DDPMScheduler): The teacher sampling noise scheduler to log samples generated with the teacher. Defaults to None.
+        sampling_noise_scheduler (LCMScheduler): The sampling noise scheduler for the student. Typically LCMScheduler. Defaults to None.
+        vae (AutoencoderKLDiffusers): The VAE model to encode the inputs. Defaults to None.
+        conditioner (ConditionerWrapper): The conditioner model. Defaults to None.
+        discriminator (torch.nn.Module): The discriminator model. Defaults to None.
+        pipeline (DiffusionPipeline): The pipeline model. Defaults to None.
+        cpu_offload (bool): Whether to offload the pipeline to CPU. Defaults to False.
+    """
 
     def __init__(
         self,
-        config: FlashDiffusionConfig,
+        config: FlashDiffusionSD3Config,
         student_denoiser: Union[
             DiffusersUNet2DWrapper,
             DiffusersUNet2DCondWrapper,
@@ -55,8 +80,9 @@ class FlashDiffusion(BaseModel):
         sampling_noise_scheduler: LCMScheduler = None,
         vae: AutoencoderKLDiffusers = None,
         conditioner: ConditionerWrapper = None,
-        adapter: DiffusersT2IAdapterWrapper = None,
         discriminator: torch.nn.Module = None,
+        pipeline: DiffusionPipeline = None,
+        cpu_offload: bool = False,
     ):
         super().__init__(config)
 
@@ -66,11 +92,8 @@ class FlashDiffusion(BaseModel):
         self.teacher_sampling_noise_scheduler = teacher_sampling_noise_scheduler
         self.vae = vae
         self.conditioner = conditioner
-        self.adapter = adapter
         self.guidance_scale_min = config.guidance_scale_min
         self.guidance_scale_max = config.guidance_scale_max
-        self.ucg_keys = config.ucg_keys
-        self.adapter_input_key = config.adapter_input_key
         self.K = config.K
         self.num_iterations_per_K = config.num_iterations_per_K
         self.distill_loss_type = config.distill_loss_type
@@ -78,7 +101,6 @@ class FlashDiffusion(BaseModel):
         self.iter_steps = 0
         self.mixture_num_components = config.mixture_num_components
         self.mixture_var = config.mixture_var
-        self.adapter_conditioning_scale = config.adapter_conditioning_scale
         self.use_dmd_loss = config.use_dmd_loss
         self.dmd_loss_scale = config.dmd_loss_scale
         self.distill_loss_scale = config.distill_loss_scale
@@ -87,7 +109,10 @@ class FlashDiffusion(BaseModel):
         self.gan_loss_type = config.gan_loss_type
         self.mode_probs = config.mode_probs
         self.use_teacher_as_real = config.use_teacher_as_real
-        self.use_empty_prompt = config.use_empty_prompt
+        self.pipeline = pipeline
+        self.cpu_offload = cpu_offload
+
+        self.teacher_noise_scheduler_copy = deepcopy(self.teacher_noise_scheduler)
 
         self.disc_update_counter = 0
 
@@ -96,6 +121,9 @@ class FlashDiffusion(BaseModel):
                 "No discriminator provided. Adversarial loss will be ignored."
             )
             self.use_adversarial_loss = False
+
+        else:
+            self.use_adversarial_loss = True
 
         self.disc_backbone = self.teacher_denoiser
 
@@ -106,23 +134,6 @@ class FlashDiffusion(BaseModel):
 
         self.K_steps = np.cumsum(self.num_iterations_per_K)
         self.K_prev = self.K[0]
-
-        if teacher_noise_scheduler is not None:
-            if hasattr(teacher_noise_scheduler, "alphas_cumprod"):
-                self.register_buffer(
-                    "sqrt_alpha_cumprod",
-                    torch.sqrt(self.teacher_noise_scheduler.alphas_cumprod),
-                )
-                self.register_buffer(
-                    "sigmas",
-                    torch.sqrt(1 - self.teacher_noise_scheduler.alphas_cumprod),
-                )
-            elif hasattr(teacher_noise_scheduler, "sigmas"):
-                self.register_buffer(
-                    "sqrt_alpha_cumprod",
-                    torch.sqrt(1 - teacher_noise_scheduler.sigmas**2),
-                )
-                self.register_buffer("sigmas", teacher_noise_scheduler.sigmas)
 
     def _encode_inputs(self, batch: Dict[str, Any]):
         """
@@ -155,7 +166,6 @@ class FlashDiffusion(BaseModel):
             mixture_var = self.mixture_var[K_step]
             prob = [
                 gaussian_mixture(
-                    K,
                     locs=locs,
                     var=mixture_var,
                     mode_probs=mode_probs,
@@ -165,8 +175,6 @@ class FlashDiffusion(BaseModel):
             prob = torch.tensor(prob) / torch.sum(torch.tensor(prob))
 
         start_idx = torch.multinomial(prob, 1)
-
-        # start_idx = torch.randint(0, len(self.teacher_noise_scheduler.timesteps), (1,))
 
         start_timestep = (
             self.teacher_noise_scheduler.timesteps[start_idx]
@@ -184,38 +192,45 @@ class FlashDiffusion(BaseModel):
         else:
             z = batch[self.input_key]
 
-        # Get conditioning
-        conditioning = self._get_conditioning(
-            batch, set_ucg_rate_zero=True, *args, **kwargs
-        )
+        self.pipeline.to(z.device)
 
-        student_conditioning = self._get_conditioning(batch, *args, **kwargs)
-
-        if self.use_empty_prompt and "text" in self.ucg_keys:
-            uncond_batch = deepcopy(batch)
-            uncond_batch["text"] = [""] * len(batch["text"])
-            unconditional_conditioning = self._get_conditioning(
-                uncond_batch, set_ucg_rate_zero=True, *args, **kwargs
+        with torch.no_grad():
+            (
+                prompt_embeds,
+                negative_prompt_embeds,
+                pooled_prompt_embeds,
+                negative_pooled_prompt_embeds,
+            ) = self.pipeline.encode_prompt(
+                prompt=batch["text"],
+                prompt_2=batch["text"],
+                prompt_3=batch["text"],
+                negative_prompt="deformed, distorted, disfigured, poorly drawn, bad anatomy, wrong anatomy, extra limb, missing limb, floating limbs, mutated hands and fingers, disconnected limbs, mutation, mutated, ugly, disgusting, blurry, amputation, NSFW",
+                negative_prompt_2="deformed, distorted, disfigured, poorly drawn, bad anatomy, wrong anatomy, extra limb, missing limb, floating limbs, mutated hands and fingers, disconnected limbs, mutation, mutated, ugly, disgusting, blurry, amputation, NSFW",
+                negative_prompt_3="deformed, distorted, disfigured, poorly drawn, bad anatomy, wrong anatomy, extra limb, missing limb, floating limbs, mutated hands and fingers, disconnected limbs, mutation, mutated, ugly, disgusting, blurry, amputation, NSFW",
+                do_classifier_free_guidance=True,
+                prompt_embeds=None,
+                negative_prompt_embeds=None,
+                pooled_prompt_embeds=None,
+                negative_pooled_prompt_embeds=None,
+                clip_skip=False,
+                device=z.device,
             )
 
-        else:
-            # Get unconditional conditioning
-            unconditional_conditioning = self._get_conditioning(
-                batch, ucg_keys=self.ucg_keys, *args, **kwargs
-            )
+        if self.cpu_offload:
+            self.pipeline.to("cpu")
 
-        # Compute the T2I adapter features
-        if self.adapter:
-            down_intrablock_additional_residuals = self.adapter(
-                batch[self.adapter_input_key]
-            )
-            for k, v in enumerate(down_intrablock_additional_residuals):
-                down_intrablock_additional_residuals[k] = (
-                    v * self.adapter_conditioning_scale
-                )
+        conditioning = {
+            "cond": {"vector": pooled_prompt_embeds, "crossattn": prompt_embeds}
+        }
 
-        else:
-            down_intrablock_additional_residuals = None
+        student_conditioning = conditioning
+
+        unconditional_conditioning = {
+            "cond": {
+                "vector": negative_pooled_prompt_embeds,
+                "crossattn": negative_prompt_embeds,
+            }
+        }
 
         # Get K for the current step
         if self.iter_steps > self.K_steps[-1]:
@@ -240,44 +255,22 @@ class FlashDiffusion(BaseModel):
             num_samples=z.shape[0], K=K, K_step=K_step, device=z.device
         )
 
+        # Add noise to sample
+        sigmas = self.get_sigmas(
+            self.teacher_noise_scheduler, start_timestep, device=z.device
+        )
+
         if start_idx == 0:
             noisy_sample_init = noise
-            noisy_sample_init *= self.teacher_noise_scheduler.init_noise_sigma
+            if hasattr(self.teacher_noise_scheduler, "init_noise_sigma"):
+                noisy_sample_init *= self.teacher_noise_scheduler.init_noise_sigma
             noisy_sample_init_student = noise
 
         else:
-            # Add noise to sample
-            noisy_sample_init = self.teacher_noise_scheduler.add_noise(
-                z, noise, start_timestep
-            )
+            noisy_sample_init = sigmas * noise + (1.0 - sigmas) * z
             noisy_sample_init_student = noisy_sample_init
 
-        noisy_sample_init_ = self.teacher_noise_scheduler.scale_model_input(
-            noisy_sample_init_student, start_timestep
-        )
-
-        # Get student denoiser output
-        student_noise_pred = self.student_denoiser(
-            sample=noisy_sample_init_,
-            timestep=start_timestep,
-            conditioning=student_conditioning,
-            down_intrablock_additional_residuals=down_intrablock_additional_residuals,
-        )
-
-        c_skip, c_out = self._scalings_for_boundary_conditions(start_timestep)
-
-        c_skip = append_dims(c_skip, noisy_sample_init_student.ndim)
-        c_out = append_dims(c_out, noisy_sample_init_student.ndim)
-
-        student_output = self._predicted_x_0(
-            student_noise_pred,
-            start_timestep.type(torch.int64),
-            noisy_sample_init_student,
-            "epsilon",
-            self.sqrt_alpha_cumprod,
-            self.sigmas,
-            z,
-        )
+        noisy_sample_init_ = noisy_sample_init_student
 
         noisy_sample = noisy_sample_init.clone().detach()
 
@@ -288,17 +281,15 @@ class FlashDiffusion(BaseModel):
         with torch.no_grad():
             for t in self.teacher_noise_scheduler.timesteps[start_idx:]:
                 timestep = torch.tensor([t], device=z.device).repeat(z.shape[0])
+                # print(timestep)
 
-                noisy_sample_ = self.teacher_noise_scheduler.scale_model_input(
-                    noisy_sample, t
-                )
+                noisy_sample_ = noisy_sample
 
                 # Denoise sample
                 cond_noise_pred = self.teacher_denoiser(
                     sample=noisy_sample_,
                     timestep=timestep,
                     conditioning=conditioning,
-                    down_intrablock_additional_residuals=down_intrablock_additional_residuals,
                     *args,
                     **kwargs,
                 )
@@ -307,7 +298,6 @@ class FlashDiffusion(BaseModel):
                     sample=noisy_sample_,
                     timestep=timestep,
                     conditioning=unconditional_conditioning,
-                    down_intrablock_additional_residuals=down_intrablock_additional_residuals,
                     *args,
                     **kwargs,
                 )
@@ -325,7 +315,14 @@ class FlashDiffusion(BaseModel):
 
         teacher_output = noisy_sample
 
-        student_output = c_skip * noisy_sample_init + c_out * student_output
+        # Get student denoiser output
+        student_noise_pred = self.student_denoiser(
+            sample=noisy_sample_init_,
+            timestep=start_timestep,
+            conditioning=student_conditioning,
+        )
+
+        student_output = noisy_sample_init_ - student_noise_pred * sigmas
 
         loss = (
             self._distill_loss(student_output, teacher_output)
@@ -338,34 +335,45 @@ class FlashDiffusion(BaseModel):
                 student_conditioning,
                 conditioning,
                 unconditional_conditioning,
-                down_intrablock_additional_residuals,
                 K,
                 K_step,
             )
             loss += dmd_loss * self.dmd_loss_scale[K_step]
 
-        gan_loss = self._gan_loss(
-            z,
-            batch,
-            student_output,
-            teacher_output,
-            conditioning,
-            down_intrablock_additional_residuals,
-            step=step,
-        )
-        print("GAN loss", gan_loss)
-        loss += self.adversarial_loss_scale[K_step] * gan_loss[0]
-        loss_disc = gan_loss[1]
+        if self.use_adversarial_loss:
 
-        return {
-            "loss": [loss, loss_disc],
-            "teacher_output": teacher_output,
-            "student_output": student_output,
-            "noisy_sample": noisy_sample_init,
-            "start_timestep": start_timestep[0].item(),
-        }
+            gan_loss = self._gan_loss(
+                z,
+                batch,
+                student_output,
+                teacher_output,
+                conditioning,
+                step=step,
+            )
+            loss += self.adversarial_loss_scale[K_step] * gan_loss[0]
+            loss_disc = gan_loss[1]
+
+            return {
+                "loss": [loss, loss_disc],
+                "teacher_output": teacher_output,
+                "student_output": student_output,
+                "noisy_sample": noisy_sample_init,
+                "start_timestep": start_timestep[0].item(),
+            }
+
+        else:
+            return {
+                "loss": loss.mean(),
+                "teacher_output": teacher_output,
+                "student_output": student_output,
+                "noisy_sample": noisy_sample_init,
+                "start_timestep": start_timestep[0].item(),
+            }
 
     def _distill_loss(self, student_output, teacher_output):
+        """
+        Compute the distillation loss
+        """
         if self.distill_loss_type == "l2":
             return torch.mean(
                 ((student_output - teacher_output) ** 2).reshape(
@@ -382,18 +390,24 @@ class FlashDiffusion(BaseModel):
             ).mean()
         elif self.distill_loss_type == "lpips":
             # center crop patches of size 64x64
-            crop_h = (student_output.shape[2] - 64) // 2
-            crop_w = (student_output.shape[3] - 64) // 2
+            crop_h = max((student_output.shape[2] - 64) // 2, 0)
+            crop_w = max((student_output.shape[3] - 64) // 2, 0)
+
             student_output = student_output[
-                :, :, crop_h : crop_h + 64, crop_w : crop_w + 64
+                :,
+                :,
+                crop_h : min(crop_h + 64, student_output.shape[2]),
+                crop_w : min(crop_w + 64, student_output.shape[3]),
             ]
             teacher_output = teacher_output[
-                :, :, crop_h : crop_h + 64, crop_w : crop_w + 64
+                :,
+                :,
+                crop_h : min(crop_h + 64, teacher_output.shape[2]),
+                crop_w : min(crop_w + 64, teacher_output.shape[3]),
             ]
 
             decoded_student = self.vae.decode(student_output).clamp(-1, 1)
             decoded_teacher = self.vae.decode(teacher_output).clamp(-1, 1)
-            # self.lpips = self.lpips.to(student_output.device)
             return self.lpips(decoded_student, decoded_teacher).mean()
         else:
             raise NotImplementedError(f"Loss type {self.loss_type} not implemented")
@@ -404,7 +418,6 @@ class FlashDiffusion(BaseModel):
         student_conditioning,
         conditioning,
         unconditional_conditioning,
-        down_intrablock_additional_residuals,
         K,
         K_step,
     ):
@@ -419,13 +432,17 @@ class FlashDiffusion(BaseModel):
             0,
             self.teacher_noise_scheduler.config.num_train_timesteps,
             (student_output.shape[0],),
-            device=student_output.device,
+            device="cpu",
+        )
+        timestep = self.teacher_noise_scheduler_copy.timesteps[timestep].to(
+            student_output.device
         )
 
         # Create noisy sample
-        noisy_student = self.teacher_noise_scheduler.add_noise(
-            student_output, noise, timestep
+        sigmas = self.get_sigmas(
+            self.teacher_noise_scheduler_copy, timestep, device=student_output.device
         )
+        noisy_student = sigmas * noise + (1.0 - sigmas) * student_output
 
         with torch.no_grad():
 
@@ -433,21 +450,18 @@ class FlashDiffusion(BaseModel):
                 sample=noisy_student,
                 timestep=timestep,
                 conditioning=conditioning,
-                down_intrablock_additional_residuals=down_intrablock_additional_residuals,
             )
 
             uncond_real_noise_pred = self.teacher_denoiser(
                 sample=noisy_student,
                 timestep=timestep,
                 conditioning=unconditional_conditioning,
-                down_intrablock_additional_residuals=down_intrablock_additional_residuals,
             )
 
             cond_fake_noise_pred = self.student_denoiser(
                 sample=noisy_student,
                 timestep=timestep,
                 conditioning=student_conditioning,
-                down_intrablock_additional_residuals=down_intrablock_additional_residuals,
             )
 
             guidance_scale = (
@@ -466,26 +480,9 @@ class FlashDiffusion(BaseModel):
         score_real = -real_noise_pred
         score_fake = -fake_noise_pred
 
-        alpha_prod_t = self.teacher_noise_scheduler.alphas_cumprod.to(
-            device=student_output.device, dtype=student_output.dtype
-        )[timestep]
-        beta_prod_t = 1.0 - alpha_prod_t
+        coeff = score_fake - score_real
 
-        coeff = (
-            (score_fake - score_real)
-            * beta_prod_t.view(-1, 1, 1, 1) ** 0.5
-            / alpha_prod_t.view(-1, 1, 1, 1) ** 0.5
-        )
-
-        pred_x_0_student = self._predicted_x_0(
-            real_noise_pred,
-            timestep,
-            noisy_student,
-            "epsilon",
-            self.sqrt_alpha_cumprod,
-            self.sigmas,
-            student_output,
-        )
+        pred_x_0_student = real_noise_pred
 
         weight = (
             1.0
@@ -505,9 +502,11 @@ class FlashDiffusion(BaseModel):
         student_output,
         teacher_output,
         conditioning,
-        down_intrablock_additional_residuals=None,
         step=0,
     ):
+        """
+        Compute the GAN loss
+        """
 
         self.disc_update_counter += 1
 
@@ -521,22 +520,26 @@ class FlashDiffusion(BaseModel):
             real = z
 
         # Selected timesteps
-        selected_timesteps = [10, 250, 500, 750]
+        selected_timesteps = [
+            float(self.teacher_noise_scheduler_copy.timesteps[-10]),
+            float(self.teacher_noise_scheduler_copy.timesteps[-250]),
+            float(self.teacher_noise_scheduler_copy.timesteps[-500]),
+            float(self.teacher_noise_scheduler_copy.timesteps[-750]),
+        ]
         prob = torch.tensor([0.25, 0.25, 0.25, 0.25])
 
         # Sample the timesteps
         idx = prob.multinomial(student_output.shape[0], replacement=True).to(
             student_output.device
         )
-        timesteps = torch.tensor(
-            selected_timesteps, device=student_output.device, dtype=torch.long
-        )[idx]
+        timesteps = torch.tensor(selected_timesteps, device=student_output.device)[idx]
 
         # Create noisy sample
-        noisy_fake = self.teacher_noise_scheduler.add_noise(
-            student_output, noise, timesteps
+        sigmas = self.get_sigmas(
+            self.teacher_noise_scheduler_copy, timesteps, device=student_output.device
         )
-        noisy_real = self.teacher_noise_scheduler.add_noise(real, noise, timesteps)
+        noisy_fake = sigmas * noise + (1.0 - sigmas) * student_output
+        noisy_real = sigmas * noise + (1.0 - sigmas) * real
 
         # Concatenate noisy samples
         noisy_sample = torch.cat([noisy_fake, noisy_real], dim=0)
@@ -552,20 +555,12 @@ class FlashDiffusion(BaseModel):
         # Concatenate timesteps
         timestep = torch.cat([timesteps, timesteps], dim=0)
 
-        if self.adapter:
-            for k, v in enumerate(down_intrablock_additional_residuals):
-                down_intrablock_additional_residuals[k] = torch.cat([v, v], dim=0)
-
-        else:
-            down_intrablock_additional_residuals = None
-
         # Predict noise level using denoiser
         denoised_sample = self.disc_backbone(
             sample=noisy_sample,
             timestep=timestep,
             conditioning=conditioning,
-            down_intrablock_additional_residuals=down_intrablock_additional_residuals,
-            return_intermediate=True,
+            return_post_mid_blocks=True,
         )
 
         denoised_sample_fake, denoised_sample_real = denoised_sample.chunk(2, dim=0)
@@ -684,73 +679,6 @@ class FlashDiffusion(BaseModel):
                 device=device,
             )
 
-    def _get_conditioning(
-        self,
-        batch: Dict[str, Any],
-        ucg_keys: List[str] = None,
-        set_ucg_rate_zero=False,
-        *args,
-        **kwargs,
-    ):
-        """
-        Get the conditionings
-        """
-        if self.conditioner is not None:
-            return self.conditioner(
-                batch,
-                ucg_keys=ucg_keys,
-                set_ucg_rate_zero=set_ucg_rate_zero,
-                vae=self.vae,
-                *args,
-                **kwargs,
-            )
-        else:
-            return None
-
-    def _scalings_for_boundary_conditions(self, timestep, sigma_data=0.5):
-        """
-        Compute the scalings for boundary conditions
-        """
-        c_skip = sigma_data**2 / ((timestep / 0.1) ** 2 + sigma_data**2)
-        c_out = (timestep / 0.1) / ((timestep / 0.1) ** 2 + sigma_data**2) ** 0.5
-        return c_skip, c_out
-
-    def _predicted_x_0(
-        self,
-        model_output,
-        timesteps,
-        sample,
-        prediction_type,
-        alphas,
-        sigmas,
-        input_sample,
-    ):
-        """
-        Predict x_0 using the model output and the timesteps depending on the prediction type
-        """
-        if prediction_type == "epsilon":
-            sigmas = extract_into_tensor(sigmas, timesteps, sample.shape)
-            alphas = extract_into_tensor(alphas, timesteps, sample.shape)
-            alpha_mask = alphas > 0
-            alpha_mask = alpha_mask.reshape(-1)
-            alpha_mask_0 = alphas == 0
-            alpha_mask_0 = alpha_mask_0.reshape(-1)
-            pred_x_0 = torch.zeros_like(sample)
-            pred_x_0[alpha_mask] = (
-                sample[alpha_mask] - sigmas[alpha_mask] * model_output[alpha_mask]
-            ) / alphas[alpha_mask]
-            pred_x_0[alpha_mask_0] = input_sample[alpha_mask_0]
-        elif prediction_type == "v_prediction":
-            sigmas = extract_into_tensor(sigmas, timesteps, sample.shape)
-            alphas = extract_into_tensor(alphas, timesteps, sample.shape)
-            pred_x_0 = alphas * sample - sigmas * model_output
-        else:
-            raise ValueError(
-                f"Prediction type {prediction_type} currently not supported."
-            )
-
-        return pred_x_0
-
     @torch.no_grad()
     def sample(
         self,
@@ -763,7 +691,6 @@ class FlashDiffusion(BaseModel):
         max_samples: int = None,
         verbose: bool = False,
         log_teacher_samples: bool = False,
-        adapter_conditioning_scale: float = 1.0,
     ):
         """
         Sample from the model
@@ -775,35 +702,49 @@ class FlashDiffusion(BaseModel):
             uncond_conditioner_inputs (Dict[str, Any]): inputs to the conditioner for CFG e.g. negative prompts.
             max_samples (Optional[int]): Maximum number of samples to generate. Default: None, all samples are generated
             verbose (bool): Whether to print progress bar. Default: True
-            adapter_conditioning_scale (float): Adapter conditioning scale. Default: 1.0
         """
 
         self.teacher_noise_scheduler.set_timesteps(num_steps)
 
-        # Set the sampling noise scheduler to the right number of timesteps for inference
-        try:
-            self.sampling_noise_scheduler.set_timesteps(
-                timesteps=self.teacher_noise_scheduler.timesteps
-            )
-        except:
-            self.sampling_noise_scheduler.set_timesteps(num_steps)
+        self.sampling_noise_scheduler.set_timesteps(num_steps)
+        print(self.sampling_noise_scheduler.timesteps)
+        print(self.sampling_noise_scheduler.sigmas)
 
         sample = z
 
-        # Get conditioning
-        conditioning = self._get_conditioning(
-            conditioner_inputs, set_ucg_rate_zero=True, device=z.device
+        self.pipeline.to(z.device)
+
+        (
+            prompt_embeds,
+            negative_prompt_embeds,
+            pooled_prompt_embeds,
+            negative_pooled_prompt_embeds,
+        ) = self.pipeline.encode_prompt(
+            prompt=conditioner_inputs["text"],
+            prompt_2=conditioner_inputs["text"],
+            prompt_3=conditioner_inputs["text"],
+            negative_prompt="deformed, distorted, disfigured, poorly drawn, bad anatomy, wrong anatomy, extra limb, missing limb, floating limbs, mutated hands and fingers, disconnected limbs, mutation, mutated, ugly, disgusting, blurry, amputation, NSFW",
+            negative_prompt_2="deformed, distorted, disfigured, poorly drawn, bad anatomy, wrong anatomy, extra limb, missing limb, floating limbs, mutated hands and fingers, disconnected limbs, mutation, mutated, ugly, disgusting, blurry, amputation, NSFW",
+            negative_prompt_3="deformed, distorted, disfigured, poorly drawn, bad anatomy, wrong anatomy, extra limb, missing limb, floating limbs, mutated hands and fingers, disconnected limbs, mutation, mutated, ugly, disgusting, blurry, amputation, NSFW",
+            do_classifier_free_guidance=True,
+            prompt_embeds=None,
+            negative_prompt_embeds=None,
+            pooled_prompt_embeds=None,
+            negative_pooled_prompt_embeds=None,
+            clip_skip=False,
+            device=z.device,
         )
 
-        # Get unconditional conditioning
-        if uncond_conditioner_inputs is not None:
-            unconditional_conditioning = self._get_conditioning(
-                uncond_conditioner_inputs, set_ucg_rate_zero=True, device=z.device
-            )
-        else:
-            unconditional_conditioning = self._get_conditioning(
-                conditioner_inputs, ucg_keys=self.ucg_keys, device=z.device
-            )
+        conditioning = {
+            "cond": {"vector": pooled_prompt_embeds, "crossattn": prompt_embeds}
+        }
+
+        unconditional_conditioning = {
+            "cond": {
+                "vector": negative_pooled_prompt_embeds,
+                "crossattn": negative_prompt_embeds,
+            }
+        }
 
         if max_samples is not None:
             sample = sample[:max_samples]
@@ -817,30 +758,20 @@ class FlashDiffusion(BaseModel):
                     for k, v in unconditional_conditioning["cond"].items()
                 }
 
-        # Compute the T2I adapter features
-        if self.adapter:
-            down_intrablock_additional_residuals = self.adapter(
-                conditioner_inputs[self.adapter_input_key]
-            )
-            for k, v in enumerate(down_intrablock_additional_residuals):
-                down_intrablock_additional_residuals[k] = v * adapter_conditioning_scale
-
-        else:
-            down_intrablock_additional_residuals = None
-
         sample_init = sample
-        sample = sample * self.sampling_noise_scheduler.init_noise_sigma
+        if hasattr(self.sampling_noise_scheduler, "init_noise_sigma"):
+            sample = sample * self.sampling_noise_scheduler.init_noise_sigma
         for i, t in tqdm(
             enumerate(self.sampling_noise_scheduler.timesteps), disable=not verbose
         ):
-            denoiser_input = self.sampling_noise_scheduler.scale_model_input(sample, t)
+
+            denoiser_input = sample
 
             # Predict noise level using denoiser using conditionings
             cond_noise_pred = self.student_denoiser(
                 sample=denoiser_input,
                 timestep=t.to(z.device).repeat(denoiser_input.shape[0]),
                 conditioning=conditioning,
-                down_intrablock_additional_residuals=down_intrablock_additional_residuals,
             )
 
             # Predict noise level using denoiser using unconditional conditionings
@@ -848,7 +779,6 @@ class FlashDiffusion(BaseModel):
                 sample=denoiser_input,
                 timestep=t.to(z.device).repeat(denoiser_input.shape[0]),
                 conditioning=unconditional_conditioning,
-                down_intrablock_additional_residuals=down_intrablock_additional_residuals,
             )
 
             # Make CFG
@@ -857,7 +787,6 @@ class FlashDiffusion(BaseModel):
                 + (1 - guidance_scale) * uncond_noise_pred
             )
 
-            # Make one step on the reverse diffusion process
             sample = self.sampling_noise_scheduler.step(
                 noise_pred, t, sample, return_dict=False
             )[0]
@@ -872,31 +801,30 @@ class FlashDiffusion(BaseModel):
         if log_teacher_samples:
             self.teacher_sampling_noise_scheduler.set_timesteps(num_steps)
 
-            sample_ref = (
-                sample_init * self.teacher_sampling_noise_scheduler.init_noise_sigma
-            )
+            if hasattr(self.teacher_sampling_noise_scheduler, "init_noise_sigma"):
+                sample_ref = (
+                    sample_init * self.teacher_sampling_noise_scheduler.init_noise_sigma
+                )
+
+            else:
+                sample_ref = sample_init
 
             for i, t in tqdm(
                 enumerate(self.teacher_sampling_noise_scheduler.timesteps),
                 disable=not verbose,
             ):
-                denoiser_input_ref = (
-                    self.teacher_sampling_noise_scheduler.scale_model_input(
-                        sample_ref, t
-                    )
-                )
+
+                denoiser_input_ref = sample_ref
 
                 cond_noise_pred_ref = self.teacher_denoiser(
                     sample=denoiser_input_ref,
                     timestep=t.to(z.device).repeat(denoiser_input_ref.shape[0]),
                     conditioning=conditioning,
-                    down_intrablock_additional_residuals=down_intrablock_additional_residuals,
                 )
                 uncond_noise_pred_ref = self.teacher_denoiser(
                     sample=denoiser_input_ref,
                     timestep=t.to(z.device).repeat(denoiser_input_ref.shape[0]),
                     conditioning=unconditional_conditioning,
-                    down_intrablock_additional_residuals=down_intrablock_additional_residuals,
                 )
 
                 noise_pred_ref = (
@@ -907,10 +835,10 @@ class FlashDiffusion(BaseModel):
                     noise_pred_ref, t, sample_ref, return_dict=False
                 )[0]
 
-                if self.vae is not None:
-                    decoded_sample_ref = self.vae.decode(sample_ref)
-                else:
-                    decoded_sample_ref = sample_ref
+            if self.vae is not None:
+                decoded_sample_ref = self.vae.decode(sample_ref)
+            else:
+                decoded_sample_ref = sample_ref
 
         return decoded_sample, decoded_sample_ref
 
@@ -926,7 +854,6 @@ class FlashDiffusion(BaseModel):
         log_teacher_samples=False,
         conditioner_inputs: Dict = None,
         conditioner_uncond_inputs: Dict = None,
-        adapter_conditioning_scale: float = 1.0,
     ):
 
         if isinstance(num_steps, int):
@@ -1004,7 +931,6 @@ class FlashDiffusion(BaseModel):
                 teacher_guidance_scale=teacher_guidance_scale,
                 max_samples=N,
                 log_teacher_samples=log_teacher_samples,
-                adapter_conditioning_scale=adapter_conditioning_scale,
             )
 
             logs[
@@ -1017,3 +943,16 @@ class FlashDiffusion(BaseModel):
                 ] = samples_ref
 
         return logs
+
+    def get_sigmas(
+        self, scheduler, timesteps, n_dim=4, dtype=torch.float32, device="cpu"
+    ):
+        sigmas = scheduler.sigmas.to(device=device, dtype=dtype)
+        schedule_timesteps = scheduler.timesteps.to(device)
+        timesteps = timesteps.to(device)
+        step_indices = [(schedule_timesteps == t).nonzero().item() for t in timesteps]
+
+        sigma = sigmas[step_indices].flatten()
+        while len(sigma.shape) < n_dim:
+            sigma = sigma.unsqueeze(-1)
+        return sigma

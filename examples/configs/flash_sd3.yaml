@@ -1,0 +1,53 @@
+
+EXP_NAME: FlashSD3
+
+# Dataset
+SHARDS_PATH_OR_URLS:
+  - pipe:cat /path/to/tar/files/{000000..000010}.tar
+VALIDATION_PROMPTS:
+  - A beautiful red car on the beach at sunset with "awesome" written in the sky, 4k, photorealistic.
+  - a 3D render of a wizard racoon holding a sign saying "4 steps" with a magic wand.
+
+# Model
+LORA: True
+LORA_RANK: 64
+K: [32, 32, 32, 32]
+NUM_ITERATIONS_PER_K: [5000, 5000, 5000, 5000]
+GUIDANCE_MIN: 7.0
+GUIDANCE_MAX: 13.0
+DISTILL_LOSS_TYPE: lpips
+UCG_KEYS: [text]
+TIMESTEP_DISTRIBUTION: mixture
+MIXTURE_NUM_COMPONENTS: 4
+MIXTURE_VAR: 0.5
+USE_DMD_LOSS: True
+DISTILL_LOSS_SCALE: [1.0, 1.0, 1.0, 1.0]
+ADVERSARIAL_LOSS_SCALE: [0.0, 0.1, 0.3, 0.5]
+DMD_LOSS_SCALE: [0, 0.3, 0.5, 0.7]
+GAN_LOSS_TYPE: lsgan
+MODE_PROBS: [
+    [0.0, 0.0, 0.5, 0.5],
+    [0.1, 0.3, 0.3, 0.3],
+    [0.25, 0.25, 0.25, 0.25],
+    [0.4, 0.2, 0.2, 0.2],
+]
+USE_TEACHER_AS_REAL: False
+TEACHER_SCHEDULER: FlowMatchEulerDiscreteScheduler
+SAMPLING_SCHEDULER: FlashFlowMatchEulerDiscreteScheduler
+TEACHER_SAMPLING_SCHEDULER: FlowMatchEulerDiscreteScheduler
+USE_EMPTY_PROMPT: False
+USE_T5: False
+
+# Training
+LR: 0.00001
+LR_DISCRIMINATOR: 0.00001
+MAX_EPOCHS: 100
+BATCH_SIZE: 2
+CPU_OFFLOAD: False
+
+# Logging
+LOG_EVERY_N_BATCHES: 200
+NUM_STEPS: [1, 2, 4]
+LOG_TEACHER_SAMPLES: True
+CKPT_EVERY_N_STEPS: 5000
+TEACHER_SAMPLING_GUIDANCE_SCALE: 7.0
