@@ -1,3 +1,3 @@
-from .tranformers import DiffusersTransformer2DWrapper
+from .tranformers import DiffusersSD3Transformer2DWrapper, DiffusersTransformer2DWrapper
 
-__all__ = ["DiffusersTransformer2DWrapper"]
+__all__ = ["DiffusersTransformer2DWrapper", "DiffusersSD3Transformer2DWrapper"]
