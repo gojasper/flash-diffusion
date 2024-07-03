@@ -9,14 +9,18 @@ This repository is the official implementation of the paper [Flash Diffusion: Ac
     <a href="https://gojasper.github.io/flash-diffusion-project/">
 	    <img src='https://img.shields.io/badge/Project-page-blue' />
 	</a>
+    <a href='https://creativecommons.org/licenses/by-nd/4.0/legalcode'>
+	    <img src="https://img.shields.io/badge/Licence-CC.BY.NC-purple" />
+	</a>
+    <br>
     <a href="https://huggingface.co/spaces/jasperai/flash-diffusion">
 	    <img src='https://img.shields.io/badge/%F0%9F%A4%97%20Demo-FlashPixart-orange' />
 	</a>
     <a href="https://huggingface.co/spaces/jasperai/flash-sd3">
 	    <img src='https://img.shields.io/badge/%F0%9F%A4%97%20Demo-FlashSD3-orange' />
 	</a>
-    <a href='https://creativecommons.org/licenses/by-nd/4.0/legalcode'>
-	    <img src="https://img.shields.io/badge/Licence-CC.BY.NC-purple" />
+    <a href="https://huggingface.co/spaces/jasperai/flash-lora">
+	    <img src='https://img.shields.io/badge/%F0%9F%A4%97%20Demo-FlashLoRAs-orange' />
 	</a>
         <br>
     <a href="https://huggingface.co/jasperai/flash-sd">
@@ -55,6 +59,8 @@ In this paper, we propose an efficient, fast, versatile and LoRA-compatible dist
 - [Text2Image model distillation](#distilling-existing-t2i-models)
 - [Distilling a custom model 🚀](#example-of-a-distillation-training-with-a-custom-conditional-diffusion-model)
 - [Inference with 🤗 Hugging Face pipelines](#inference-with-a-huggingface-pipeline-)
+- [Using Flash with ComfyUI](#using-flash-in-comfyui)
+- [Flash for training-free LoRAs acceleration 🎨](#combining-flash-diffusion-with-existing-loras-)
 - [Citing this repository](#citation)
 
 ## Method
@@ -74,9 +80,10 @@ Our method aims to create a fast, reliable, and adaptable approach for various u
 - [Flash Pixart (DiT)](https://huggingface.co/jasperai/flash-pixart), distilled from a [Pixart-α teacher](https://huggingface.co/PixArt-alpha/PixArt-XL-2-1024-MS)
 - [Flash SD](https://huggingface.co/jasperai/flash-sd), distilled from a [SD1.5 teacher](https://huggingface.co/runwayml/stable-diffusion-v1-5)
 
+It can also be used to accelerate existing LoRAs in a **training-free** manner. See this [section](#combining-flash-diffusion-with-existing-loras-) to know more.
+
 ### Varying backbones for *Text-to-image*
-<details>
-    <summary><b>Flash Stable Diffusion 3</b></summary>
+#### Flash Stable Diffusion 3 (MMDiT)
 <figure>
 	<p align="center">
         	<img style="width:600px;" src="assets/flash_sd3.jpg">
@@ -87,9 +94,8 @@ Our method aims to create a fast, reliable, and adaptable approach for various u
 			</figcaption>
 	 </p>
 </figure>
-</details>
-<details>
-    <summary><b>Flash SDXL</b></summary>
+
+#### Flash SDXL (UNet)
 <figure>
 	<p align="center">
         	<img style="width:600px;" src="assets/flash_sdxl_grid.jpg">
@@ -100,9 +106,8 @@ Our method aims to create a fast, reliable, and adaptable approach for various u
 			</figcaption>
 	 </p>
 </figure>
-</details>
-<details>
-    <summary><b>Flash Pixart (DiT)</b></summary>
+
+#### Flash Pixart (DiT)
 <figure>
 	<p align="center">
         	<img style="width:600px;" src="assets/flash_pixart_grid.jpg">
@@ -113,9 +118,8 @@ Our method aims to create a fast, reliable, and adaptable approach for various u
 			</figcaption>
 	 </p>
 </figure>
-</details>
-<details>
-    <summary><b>Flash SD</b></summary>
+
+#### Flash SD
 <figure>
 	<p align="center">
         	<img style="width:600px;" src="assets/flash_sd_grid.jpg">
@@ -153,6 +157,21 @@ Our method aims to create a fast, reliable, and adaptable approach for various u
             <img style="width:600px;" src="assets/adapters_grid.jpg">
     </p>
 </details>
+
+### Training Free LoRA Acceleration
+#### SDXL LoRAs
+<figure>
+	<p align="center">
+        	<img style="width:600px;" src="assets/flash_loras.jpg">
+			<figcaption>
+				<p align="center">
+					<b>Images generated using 4 NFEs</b>
+			 	</p>
+			</figcaption>
+	 </p>
+</figure>
+</details>
+
 
 ## Setup
 To be up and running, you need first to create a virtual env with at least `python3.10` installed and activate it
@@ -327,6 +346,58 @@ pipe.to("cuda")
 prompt = "A raccoon reading a book in a lush forest."
 
 image = pipe(prompt, num_inference_steps=4, guidance_scale=0).images[0]
+```
+
+## Using Flash in ComfyUI
+
+To use FlashSDXL locally using Comfyui you need to :
+
+1) Make sure your comfyUI install is up to date
+2) Download the checkpoint from huggingface. In case you wonder how, go to "Files and Version" go to [`comfy`](https://huggingface.co/jasperai/flash-sdxl/tree/main/comfy) folder and hit the download button next to the `FlashSDXL.safetensors`
+3) Move the new checkpoint file to your local `comfyUI/models/loras/`. folder
+Use it as a LoRA on top of `sd_xl_base_1.0_0.9vae.safetensors`, a simple comfyui workflow.json is provided in this repo inc `examples/comfy`
+
+*Disclaimer : Model has been trained to work with a cfg scale of 1 and a lcm scheduler but parameters can be tweaked a bit.*
+
+
+## Combining Flash Diffusion with Existing LoRAs 🎨
+
+Flash Diffusion models can also be combined with existing LoRAs to unlock few steps generation in a **training free** manner. They can be integrated straight to Hugging Face pipelines. See an example below.
+
+```python
+from diffusers import DiffusionPipeline, LCMScheduler
+import torch
+
+user_lora_id = "TheLastBen/Papercut_SDXL"
+trigger_word = "papercut"
+
+flash_lora_id = "jasperai/flash-sdxl"
+
+# Load Pipeline
+pipe = DiffusionPipeline.from_pretrained(
+    "stabilityai/stable-diffusion-xl-base-1.0",
+    variant="fp16"
+)
+
+# Set scheduler
+pipe.scheduler = LCMScheduler.from_config(
+    pipe.scheduler.config
+)
+
+# Load LoRAs
+pipe.load_lora_weights(flash_lora_id, adapter_name="flash")
+pipe.load_lora_weights(user_lora_id, adapter_name="lora")
+
+pipe.set_adapters(["flash", "lora"], adapter_weights=[1.0, 1.0])
+pipe.to(device="cuda", dtype=torch.float16)
+
+prompt = f"{trigger_word} a cute corgi"
+
+image = pipe(
+    prompt,
+    num_inference_steps=4,
+    guidance_scale=0
+).images[0]
 ```
 
 # License
