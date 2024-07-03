@@ -35,6 +35,10 @@ This repository is the official implementation of the paper [Flash Diffusion: Ac
     	<a href="https://huggingface.co/jasperai/flash-sd3">
 	    <img src='https://img.shields.io/badge/%F0%9F%A4%97%20Ckpt-FlashSD3-yellow' />
 	</a>
+    	</a>
+    	<a href="https://huggingface.co/jasperai/flash-sdxl/tree/main/comfy">
+	    <img src='https://img.shields.io/badge/Comfy-FlashSDXL-black' />
+	</a>
 </p>
 
 <figure>
