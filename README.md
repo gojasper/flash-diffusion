@@ -1,4 +1,4 @@
-# ⚡ Flash Diffusion ⚡
+# ⚡ Flash Diffusion ⚡ (AAAI 2025 Oral)
 
 This repository is the official implementation of the paper [Flash Diffusion: Accelerating Any Conditional Diffusion Model for Few Steps Image Generation](http://arxiv.org/abs/2406.02347).
 
