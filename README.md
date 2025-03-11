@@ -411,12 +411,11 @@ This code is released under the [Creative Commons BY-NC 4.0 license](https://cre
 If you find this work useful or use it in your research, please consider citing us
 
 ```bibtex
-@misc{chadebec2024flash,
-      title={Flash Diffusion: Accelerating Any Conditional Diffusion Model for Few Steps Image Generation}, 
-      author={Clement Chadebec and Onur Tasar and Eyal Benaroche and Benjamin Aubin},
-      year={2024},
-      eprint={2406.02347},
-      archivePrefix={arXiv},
-      primaryClass={cs.CV}
+@inproceedings{chadebec2025flash,
+	title={Flash Diffusion: Accelerating Any Conditional Diffusion Model for Few Steps Image Generation},
+	author={Clement Chadebec and Onur Tasar and Eyal Benaroche and Benjamin Aubin},
+	booktitle={The 39th Annual AAAI Conference on Artificial Intelligence},
+	year={2025},
+	url={https://openreview.net/forum?id=D8rQlCEKCT}
 }
 ```
