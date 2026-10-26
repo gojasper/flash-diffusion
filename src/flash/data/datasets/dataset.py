@@ -161,7 +161,7 @@ class DataModule(pl.LightningDataModule):
             Configuration for the evaluation dataset
 
         eval_filters_mappers (List[Union[FilterWrapper, MapperWrapper]]):
-            List of filters and mappers for the evaluation dataset.These will be sequentially applied.
+            List of filters and mappers for the evaluation dataset. These will be sequentially applied.
     """
 
     def __init__(

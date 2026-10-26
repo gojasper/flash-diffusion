@@ -37,7 +37,7 @@ class TrainingConfig(BaseConfig):
         backup_every (int):
             The frequency to backup the model. Default is 50.
         trainable_params (Union[List[str], List[List[str]]]):
-            Regexes indicateing the parameters to train for each optimizer.
+            Regexes indicating the parameters to train for each optimizer.
             Default is [["./*"]] (i.e. all parameters are trainable)
         log_keys: Union[str, List[str]]:
             The keys to log when sampling from the model. Default is "txt"

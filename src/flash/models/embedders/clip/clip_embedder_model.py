@@ -18,7 +18,7 @@ class ClipEmbedder(BaseConditioner):
     def __init__(self, config: ClipEmbedderConfig):
         BaseConditioner.__init__(self, config)
 
-        # overides predefined configuration
+        # overrides predefined configuration
         kwargs = dict()
         if config.pad_token is not None:
             kwargs["pad_token"] = config.pad_token
@@ -112,7 +112,7 @@ class ClipEmbedderWithProjection(BaseConditioner):
     def __init__(self, config: ClipEmbedderConfig):
         BaseConditioner.__init__(self, config)
 
-        # overides predefined configuration
+        # overrides predefined configuration
         kwargs = dict()
         if config.pad_token is not None:
             kwargs["pad_token"] = config.pad_token

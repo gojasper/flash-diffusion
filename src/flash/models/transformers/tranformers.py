@@ -19,7 +19,7 @@ class DiffusersTransformer2DWrapper(Transformer2DModel):
         timesteps_embedding_num_channels (int): The number of timesteps embedding channels
         projection_class_embeddings_input_dim (Optional[int]): The input dimension of the vector embeddings.
         use_concat_vector_conditioning (bool): Whether to use concat vector conditioning. If True one TimestepEmbedding will be created
-            for each vector conditionings and the outputs will be concatenated and added to the time embedding. If False, a single
+            for each vector conditioning and the outputs will be concatenated and added to the time embedding. If False, a single
             TimestepEmbedding will be created and the outputs will be added to the time embedding during normalization.
         num_vector_conditionings (Optional[int]): The number of vector conditionings. If use_concat_conditioning is True, then this
             parameter must be provided.
